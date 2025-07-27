@@ -7,7 +7,7 @@ WORKDIR /app
 COPY target/*.jar app.jar
 
 # Port exposé
-EXPOSE 8080
+EXPOSE 8443
 
 # Commande de démarrage
 ENTRYPOINT ["java", "-jar", "app.jar"]

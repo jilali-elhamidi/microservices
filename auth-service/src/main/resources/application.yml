@@ -4,8 +4,8 @@ spring:
       client:
         registration:
           google:
-            client-id: <votre-client-id-google>
-            client-secret: <votre-client-secret-google>
+            client-id: <votre-client-id-google> # Remplacez l'ID
+              client-secret: <votre-client-secret-google>
             scope:
               - openid
               - email
@@ -22,3 +22,15 @@ jwt:
   secret: c3ByaW5nLWJvb3Qtc2VjdXJpdHktand0LWNvbGxhYm9yYXRpdmUtdGVhbS1wcm9qZWN0LWtleS1zZWNyZXQ=
   access-token-expirationMs: 900000 # 15 minutes
   refresh-token-expirationMs: 604800000 # 7 jours
+
+# =========================
+# SERVER & SSL/HTTPS CONFIG
+# =========================
+server:
+  port: 8443
+  ssl:
+    key-store: classpath:keystore.p12
+    key-store-password: jilali
+    key-password: jilali
+    key-store-type: PKCS12
+    key-alias: myapp

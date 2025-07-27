@@ -1,0 +1,17 @@
+# Fichiers générés par le build Maven
+/target/
+
+# Fichiers générés par l'IDE (IntelliJ, VS Code, etc.)
+.idea/
+.mvn/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# Fichiers temporaires et de logs de crash
+
+
+# Fichiers de secrets
+# Les fichiers de configuration sensibles ne doivent PAS être dans Git
+**/keystore.p12
