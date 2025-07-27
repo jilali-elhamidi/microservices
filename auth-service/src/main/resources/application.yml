@@ -1,0 +1,22 @@
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: <votre-client-id-google>
+            client-secret: <votre-client-secret-google>
+            scope:
+              - openid
+              - email
+              - profile
+        provider:
+          google:
+            authorization-uri: https://accounts.google.com/o/oauth2/auth
+            token-uri: https://www.googleapis.com/oauth2/v4/token
+            jwk-set-uri: https://www.googleapis.com/oauth2/v3/certs
+            user-info-uri: https://www.googleapis.com/oauth2/v3/userinfo
+
+jwt:
+  secret: c3ByaW5nLWJvb3Qtc2VjdXJpdHktand0LWNvbGxhYm9yYXRpdmUtdGVhbS1wcm9qZWN0LWtleS1zZWNyZXQ=
+  expirationMs: 3600000

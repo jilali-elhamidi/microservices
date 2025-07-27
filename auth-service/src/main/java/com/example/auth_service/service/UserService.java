@@ -6,38 +6,31 @@ import com.example.auth_service.dto.RegisterRequest;
 import com.example.auth_service.event.UserRegisteredEvent;
 import com.example.auth_service.model.User;
 import com.example.auth_service.repository.UserRepository;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.io.Decoders;
-import io.jsonwebtoken.security.Keys;
+import com.example.auth_service.utils.JwtTokenProvider;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.slf4j.Logger; // Importez la classe Logger
-import org.slf4j.LoggerFactory; // Importez la classe LoggerFactory
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import javax.crypto.SecretKey;
-import java.util.Date;
 import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class UserService {
 
-    private static final Logger log = LoggerFactory.getLogger(UserService.class); // Déclarez un logger
+    private static final Logger log = LoggerFactory.getLogger(UserService.class);
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final RabbitTemplate rabbitTemplate;
+    private final JwtTokenProvider jwtTokenProvider;
 
-    @Value("${jwt.secret}")
-    private String secret;
-
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, RabbitTemplate rabbitTemplate) {
+    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, RabbitTemplate rabbitTemplate, JwtTokenProvider jwtTokenProvider) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.rabbitTemplate = rabbitTemplate;
+        this.jwtTokenProvider = jwtTokenProvider;
     }
 
     public User registerUser(RegisterRequest request) {
@@ -50,18 +43,8 @@ public class UserService {
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         User savedUser = userRepository.save(user);
 
-        // Envoi de l'événement à RabbitMQ
-        UserRegisteredEvent event = new UserRegisteredEvent();
-        event.setUserId(savedUser.getId());
-        event.setEmail(savedUser.getEmail());
-
-        log.info("Attempting to send UserRegisteredEvent for userId: {} to queue: {}", savedUser.getId(), RabbitMQConfig.QUEUE_NAME);
-        try {
-            rabbitTemplate.convertAndSend(RabbitMQConfig.QUEUE_NAME, event);
-            log.info("Successfully sent UserRegisteredEvent for userId: {}", savedUser.getId());
-        } catch (Exception e) {
-            log.error("Failed to send UserRegisteredEvent for userId: {}", savedUser.getId(), e);
-        }
+        // La méthode est appelée sans le paramètre 'name'
+        publishUserRegisteredEvent(savedUser.getId(), savedUser.getEmail());
 
         return savedUser;
     }
@@ -69,42 +52,43 @@ public class UserService {
     public String login(LoginRequest request) {
         Optional<User> userOptional = userRepository.findByEmail(request.getEmail());
         if (userOptional.isPresent() && passwordEncoder.matches(request.getPassword(), userOptional.get().getPassword())) {
-            return generateToken(userOptional.get().getId());
+            return jwtTokenProvider.generateToken(userOptional.get().getId().toString());
         }
-        return null; // Login failed
+        return null;
     }
 
-    public String validateToken(String token) {
+    public UUID findOrCreateUser(String email, String name) {
+        Optional<User> userOptional = userRepository.findByEmail(email);
+
+        if (userOptional.isPresent()) {
+            return userOptional.get().getId();
+        } else {
+            User newUser = new User();
+            newUser.setEmail(email);
+            newUser.setPassword(passwordEncoder.encode(""));
+
+            User savedUser = userRepository.save(newUser);
+
+            // La méthode est appelée sans le paramètre 'name'
+            publishUserRegisteredEvent(savedUser.getId(), savedUser.getEmail());
+
+            return savedUser.getId();
+        }
+    }
+
+    // La signature de la méthode privée est modifiée pour ne plus prendre 'name'
+    private void publishUserRegisteredEvent(UUID userId, String email) {
+        UserRegisteredEvent event = new UserRegisteredEvent();
+        event.setUserId(userId);
+        event.setEmail(email);
+        // event.setName(name); est supprimé
+
+        log.info("Attempting to send UserRegisteredEvent for userId: {} to queue: {}", userId, RabbitMQConfig.QUEUE_NAME);
         try {
-            Jwts.parserBuilder()
-                    .setSigningKey(getSignKey())
-                    .build()
-                    .parseClaimsJws(token);
-
-            // Si le token est valide, on récupère l'ID de l'utilisateur
-            return Jwts.parserBuilder()
-                    .setSigningKey(getSignKey())
-                    .build()
-                    .parseClaimsJws(token)
-                    .getBody()
-                    .getSubject();
+            rabbitTemplate.convertAndSend(RabbitMQConfig.QUEUE_NAME, event);
+            log.info("Successfully sent UserRegisteredEvent for userId: {}", userId);
         } catch (Exception e) {
-            log.warn("Token validation failed: {}", e.getMessage()); // Loguer l'échec de validation
-            return null; // Token invalide
+            log.error("Failed to send UserRegisteredEvent for userId: {}", userId, e);
         }
-    }
-
-    private String generateToken(UUID userId) {
-        return Jwts.builder()
-                .setSubject(userId.toString())
-                .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 30)) // Expire après 30 minutes
-                .signWith(getSignKey(), SignatureAlgorithm.HS256)
-                .compact();
-    }
-
-    private SecretKey getSignKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(secret);
-        return Keys.hmacShaKeyFor(keyBytes);
     }
 }
