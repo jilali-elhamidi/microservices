@@ -2,6 +2,7 @@ package com.example.auth_service.service;
 
 import com.example.auth_service.config.RabbitMQConfig;
 import com.example.auth_service.dto.LoginRequest;
+import com.example.auth_service.dto.LoginResponse;
 import com.example.auth_service.dto.RegisterRequest;
 import com.example.auth_service.event.UserRegisteredEvent;
 import com.example.auth_service.model.User;
@@ -43,16 +44,20 @@ public class UserService {
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         User savedUser = userRepository.save(user);
 
-        // La méthode est appelée sans le paramètre 'name'
         publishUserRegisteredEvent(savedUser.getId(), savedUser.getEmail());
 
         return savedUser;
     }
 
-    public String login(LoginRequest request) {
+    public LoginResponse login(LoginRequest request) {
         Optional<User> userOptional = userRepository.findByEmail(request.getEmail());
         if (userOptional.isPresent() && passwordEncoder.matches(request.getPassword(), userOptional.get().getPassword())) {
-            return jwtTokenProvider.generateToken(userOptional.get().getId().toString());
+            User user = userOptional.get();
+            String accessToken = jwtTokenProvider.generateAccessToken(user.getId().toString());
+            String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId().toString());
+            user.setRefreshToken(refreshToken);
+            userRepository.save(user);
+            return new LoginResponse(accessToken, refreshToken);
         }
         return null;
     }
@@ -69,19 +74,37 @@ public class UserService {
 
             User savedUser = userRepository.save(newUser);
 
-            // La méthode est appelée sans le paramètre 'name'
             publishUserRegisteredEvent(savedUser.getId(), savedUser.getEmail());
 
             return savedUser.getId();
         }
     }
 
-    // La signature de la méthode privée est modifiée pour ne plus prendre 'name'
+    public String refreshToken(String refreshToken) {
+        if (jwtTokenProvider.validateToken(refreshToken)) {
+            String userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
+
+            Optional<User> userOptional = userRepository.findById(UUID.fromString(userId));
+            if (userOptional.isPresent() && userOptional.get().getRefreshToken().equals(refreshToken)) {
+                return jwtTokenProvider.generateAccessToken(userId);
+            }
+        }
+        return null;
+    }
+
+    public void saveRefreshToken(UUID userId, String refreshToken) {
+        Optional<User> userOptional = userRepository.findById(userId);
+        if (userOptional.isPresent()) {
+            User user = userOptional.get();
+            user.setRefreshToken(refreshToken);
+            userRepository.save(user);
+        }
+    }
+
     private void publishUserRegisteredEvent(UUID userId, String email) {
         UserRegisteredEvent event = new UserRegisteredEvent();
         event.setUserId(userId);
         event.setEmail(email);
-        // event.setName(name); est supprimé
 
         log.info("Attempting to send UserRegisteredEvent for userId: {} to queue: {}", userId, RabbitMQConfig.QUEUE_NAME);
         try {

@@ -1,9 +1,11 @@
+// src/main/java/com/example/auth_service/controller/AuthController.java
 package com.example.auth_service.controller;
 
 import com.example.auth_service.dto.LoginRequest;
+import com.example.auth_service.dto.LoginResponse;
 import com.example.auth_service.dto.RegisterRequest;
 import com.example.auth_service.service.UserService;
-import com.example.auth_service.utils.JwtTokenProvider; // 1. Importation du JwtTokenProvider
+import com.example.auth_service.utils.JwtTokenProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -13,9 +15,8 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final UserService userService;
-    private final JwtTokenProvider jwtTokenProvider; // 2. Ajout de la dépendance pour JwtTokenProvider
+    private final JwtTokenProvider jwtTokenProvider;
 
-    // 3. Mise à jour du constructeur pour l'injection des deux services
     public AuthController(UserService userService, JwtTokenProvider jwtTokenProvider) {
         this.userService = userService;
         this.jwtTokenProvider = jwtTokenProvider;
@@ -32,28 +33,32 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<String> login(@RequestBody LoginRequest request) {
-        String token = userService.login(request);
-        if (token != null) {
-            return ResponseEntity.ok(token);
+    public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
+        LoginResponse response = userService.login(request);
+        if (response != null) {
+            return ResponseEntity.ok(response);
         }
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid credentials");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null);
+    }
+
+    @PostMapping("/refresh-token")
+    public ResponseEntity<String> refreshToken(@RequestBody String refreshToken) {
+        String newAccessToken = userService.refreshToken(refreshToken);
+        if (newAccessToken != null) {
+            return ResponseEntity.ok(newAccessToken);
+        }
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid refresh token");
     }
 
     @GetMapping("/validateToken")
     public ResponseEntity<String> validateToken(@RequestHeader("Authorization") String token) {
-        // 4. Ajout d'une vérification du préfixe "Bearer " pour éviter les erreurs d'index
         if (token != null && token.startsWith("Bearer ")) {
-            String jwt = token.substring(7); // Extraire le token
-
-            // 5. Utilisation du JwtTokenProvider pour la validation et l'extraction de l'ID
+            String jwt = token.substring(7);
             if (jwtTokenProvider.validateToken(jwt)) {
                 String userId = jwtTokenProvider.getUserIdFromToken(jwt);
                 return ResponseEntity.ok(userId);
             }
         }
-
-        // Si le token est null, ne commence pas par "Bearer ", ou est invalide
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid Token");
     }
 }

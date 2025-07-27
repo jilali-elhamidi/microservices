@@ -1,13 +1,15 @@
+// src/main/java/com/example/auth_service/controller/OAuth2LoginController.java
 package com.example.auth_service.controller;
 
+import com.example.auth_service.dto.LoginResponse;
 import com.example.auth_service.service.UserService;
 import com.example.auth_service.utils.JwtTokenProvider;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-// Ne pas importer RedirectView car on ne l'utilise plus
-import org.springframework.http.ResponseEntity;
+
 import java.util.UUID;
 
 @RestController
@@ -22,18 +24,21 @@ public class OAuth2LoginController {
     }
 
     @GetMapping("/login-success")
-    public ResponseEntity<String> oauth2LoginSuccess(@AuthenticationPrincipal OAuth2User oauth2User) {
+    public ResponseEntity<LoginResponse> oauth2LoginSuccess(@AuthenticationPrincipal OAuth2User oauth2User) {
         if (oauth2User == null) {
-            return ResponseEntity.status(401).body("User not authenticated with Google.");
+            return ResponseEntity.status(401).body(null);
         }
 
         String email = oauth2User.getAttribute("email");
         String name = oauth2User.getAttribute("name");
 
         UUID userId = userService.findOrCreateUser(email, name);
-        String jwtToken = jwtTokenProvider.generateToken(userId.toString());
+        String accessToken = jwtTokenProvider.generateAccessToken(userId.toString());
+        String refreshToken = jwtTokenProvider.generateRefreshToken(userId.toString());
 
-        // Au lieu de rediriger, on renvoie directement le token dans le corps de la réponse
-        return ResponseEntity.ok(jwtToken);
+        // Gérer la sauvegarde du refresh token dans la base de données
+        userService.saveRefreshToken(userId, refreshToken);
+
+        return ResponseEntity.ok(new LoginResponse(accessToken, refreshToken));
     }
 }

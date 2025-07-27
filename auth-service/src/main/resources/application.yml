@@ -17,6 +17,8 @@ spring:
             jwk-set-uri: https://www.googleapis.com/oauth2/v3/certs
             user-info-uri: https://www.googleapis.com/oauth2/v3/userinfo
 
+# Nouvelles propriétés pour la gestion des tokens
 jwt:
   secret: c3ByaW5nLWJvb3Qtc2VjdXJpdHktand0LWNvbGxhYm9yYXRpdmUtdGVhbS1wcm9qZWN0LWtleS1zZWNyZXQ=
-  expirationMs: 3600000
+  access-token-expirationMs: 900000 # 15 minutes
+  refresh-token-expirationMs: 604800000 # 7 jours
