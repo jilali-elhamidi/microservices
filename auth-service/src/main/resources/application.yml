@@ -5,7 +5,7 @@ spring:
         registration:
           google:
             client-id: <votre-client-id-google> # Remplacez l'ID
-              client-secret: <votre-client-secret-google>
+            client-secret: <votre-client-secret-google>
             scope:
               - openid
               - email

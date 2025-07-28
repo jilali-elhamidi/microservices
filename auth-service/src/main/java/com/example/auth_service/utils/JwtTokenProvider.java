@@ -30,7 +30,7 @@ public class JwtTokenProvider {
     public String generateAccessToken(String userId) {
         return Jwts.builder()
                 .setSubject(userId)
-                .setIssuedAt(new Date(System.currentTimeMillis()))
+                .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + accessTokenExpirationMs))
                 .signWith(getSignKey(), SignatureAlgorithm.HS256)
                 .compact();
@@ -39,7 +39,7 @@ public class JwtTokenProvider {
     public String generateRefreshToken(String userId) {
         return Jwts.builder()
                 .setSubject(userId)
-                .setIssuedAt(new Date(System.currentTimeMillis()))
+                .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + refreshTokenExpirationMs))
                 .signWith(getSignKey(), SignatureAlgorithm.HS256)
                 .compact();
