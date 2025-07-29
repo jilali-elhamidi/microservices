@@ -19,6 +19,7 @@ public class User {
     @Column(nullable = false)
     private String password;
 
+    // Renommé et rendu nullable pour la rotation
     @Column(nullable = true)
-    private String refreshToken;
+    private String hashedRefreshToken; // Stocke le hachage du refresh token
 }

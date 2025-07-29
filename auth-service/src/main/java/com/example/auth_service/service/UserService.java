@@ -55,13 +55,68 @@ public class UserService {
             User user = userOptional.get();
             String accessToken = jwtTokenProvider.generateAccessToken(user.getId().toString());
             String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId().toString());
-            user.setRefreshToken(refreshToken);
+
+            // Hacher et sauvegarder le refresh token
+            user.setHashedRefreshToken(passwordEncoder.encode(refreshToken)); // Utilisez passwordEncoder pour hacher
             userRepository.save(user);
+
             return new LoginResponse(accessToken, refreshToken);
         }
         return null;
     }
 
+    // Méthode pour rafraîchir les tokens avec rotation
+    public LoginResponse refreshToken(String oldRefreshToken) {
+        // 1. Valider l'ancien refresh token
+        if (!jwtTokenProvider.validateToken(oldRefreshToken)) {
+            log.warn("Invalid or expired refresh token provided.");
+            return null;
+        }
+
+        String userId = jwtTokenProvider.getUserIdFromToken(oldRefreshToken);
+        Optional<User> userOptional = userRepository.findById(UUID.fromString(userId));
+
+        if (userOptional.isPresent()) {
+            User user = userOptional.get();
+
+            // 2. Vérifier que le hachage de l'ancien refresh token correspond à celui stocké
+            if (user.getHashedRefreshToken() != null && passwordEncoder.matches(oldRefreshToken, user.getHashedRefreshToken())) {
+                // 3. Invalider l'ancien refresh token (en supprimant son hachage)
+                user.setHashedRefreshToken(null); // Ou marquez-le comme invalide si vous voulez un historique
+                userRepository.save(user);
+
+                // 4. Générer un nouveau couple de tokens
+                String newAccessToken = jwtTokenProvider.generateAccessToken(userId);
+                String newRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
+
+                // 5. Sauvegarder le hachage du nouveau refresh token
+                user.setHashedRefreshToken(passwordEncoder.encode(newRefreshToken));
+                userRepository.save(user);
+
+                return new LoginResponse(newAccessToken, newRefreshToken);
+            } else {
+                log.warn("Refresh token provided does not match stored token for user: {}", userId);
+                // Si le refresh token ne correspond pas, c'est peut-être une tentative d'abus.
+                // Vous pourriez vouloir révoquer tous les tokens de cet utilisateur ici pour plus de sécurité.
+                return null;
+            }
+        }
+        log.warn("User not found for refresh token with userId: {}", userId);
+        return null;
+    }
+
+    // Méthode pour révoquer un refresh token (déconnexion)
+    public void revokeRefreshToken(UUID userId) {
+        Optional<User> userOptional = userRepository.findById(userId);
+        if (userOptional.isPresent()) {
+            User user = userOptional.get();
+            user.setHashedRefreshToken(null); // Invalide le refresh token
+            userRepository.save(user);
+            log.info("Refresh token revoked for user: {}", userId);
+        }
+    }
+
+    // Méthode findOrCreateUser pour OAuth2, mise à jour pour gérer le refresh token
     public UUID findOrCreateUser(String email, String name) {
         Optional<User> userOptional = userRepository.findByEmail(email);
 
@@ -70,8 +125,7 @@ public class UserService {
         } else {
             User newUser = new User();
             newUser.setEmail(email);
-            newUser.setPassword(passwordEncoder.encode(""));
-
+            newUser.setPassword(passwordEncoder.encode(UUID.randomUUID().toString())); // Générer un mot de passe aléatoire
             User savedUser = userRepository.save(newUser);
 
             publishUserRegisteredEvent(savedUser.getId(), savedUser.getEmail());
@@ -80,24 +134,14 @@ public class UserService {
         }
     }
 
-    public String refreshToken(String refreshToken) {
-        if (jwtTokenProvider.validateToken(refreshToken)) {
-            String userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
-
-            Optional<User> userOptional = userRepository.findById(UUID.fromString(userId));
-            if (userOptional.isPresent() && userOptional.get().getRefreshToken().equals(refreshToken)) {
-                return jwtTokenProvider.generateAccessToken(userId);
-            }
-        }
-        return null;
-    }
-
+    // Méthode saveRefreshToken pour OAuth2, mise à jour pour hacher
     public void saveRefreshToken(UUID userId, String refreshToken) {
         Optional<User> userOptional = userRepository.findById(userId);
         if (userOptional.isPresent()) {
             User user = userOptional.get();
-            user.setRefreshToken(refreshToken);
+            user.setHashedRefreshToken(passwordEncoder.encode(refreshToken)); // Hacher avant de sauvegarder
             userRepository.save(user);
+            log.info("Refresh token saved for user: {}", userId);
         }
     }
 

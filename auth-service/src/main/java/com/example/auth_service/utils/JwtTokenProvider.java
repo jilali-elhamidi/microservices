@@ -22,11 +22,12 @@ public class JwtTokenProvider {
     private String secret;
 
     @Value("${jwt.access-token-expirationMs}")
-    private int accessTokenExpirationMs;
+    private int accessTokenExpirationMs; // Durée de vie de l'access token en ms
 
     @Value("${jwt.refresh-token-expirationMs}")
-    private int refreshTokenExpirationMs;
+    private int refreshTokenExpirationMs; // Durée de vie du refresh token en ms
 
+    // Génère un access token
     public String generateAccessToken(String userId) {
         return Jwts.builder()
                 .setSubject(userId)
@@ -36,6 +37,7 @@ public class JwtTokenProvider {
                 .compact();
     }
 
+    // Génère un refresh token
     public String generateRefreshToken(String userId) {
         return Jwts.builder()
                 .setSubject(userId)

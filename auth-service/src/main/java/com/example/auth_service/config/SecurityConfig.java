@@ -21,12 +21,13 @@ public class SecurityConfig {
                                 "/auth/register",
                                 "/auth/login",
                                 "/auth/validateToken",
-                                "/login-success"
+                                "/auth/refresh-token", // Nouveau endpoint pour le refresh token
+                                "/login-success"       // Pour la redirection OAuth2
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth2 -> oauth2
-                        .defaultSuccessUrl("/login-success", true)
+                        .defaultSuccessUrl("/login-success", true) // Redirection après succès OAuth2
                 );
 
         return http.build();

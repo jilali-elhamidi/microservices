@@ -10,13 +10,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
 
     private final UserService userService;
-    private final JwtTokenProvider jwtTokenProvider;
+    private final JwtTokenProvider jwtTokenProvider; // Garder pour validateToken
 
     public AuthController(UserService userService, JwtTokenProvider jwtTokenProvider) {
         this.userService = userService;
@@ -39,16 +40,16 @@ public class AuthController {
         if (response != null) {
             return ResponseEntity.ok(response);
         }
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null);
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null); // Retourne null dans le corps en cas d'échec
     }
 
     @PostMapping("/refresh-token")
-    public ResponseEntity<String> refreshToken(@RequestBody String refreshToken) {
-        String newAccessToken = userService.refreshToken(refreshToken);
-        if (newAccessToken != null) {
-            return ResponseEntity.ok(newAccessToken);
+    public ResponseEntity<LoginResponse> refreshToken(@RequestBody String refreshToken) { // Le client envoie juste le refresh token
+        LoginResponse newTokens = userService.refreshToken(refreshToken);
+        if (newTokens != null) {
+            return ResponseEntity.ok(newTokens);
         }
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid refresh token");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null); // Retourne null dans le corps en cas d'échec
     }
 
     @GetMapping("/validateToken")
@@ -61,5 +62,23 @@ public class AuthController {
             }
         }
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid Token");
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(@RequestHeader("Authorization") String token) {
+        if (token != null && token.startsWith("Bearer ")) {
+            String accessToken = token.substring(7);
+            // Dans une architecture JWT stateless, la déconnexion nécessite la révocation du refresh token
+            // Ou la mise en place d'une liste noire pour les access tokens si leur durée de vie est longue.
+            // Ici, nous allons révoquer le refresh token associé à l'utilisateur de l'access token.
+            try {
+                String userId = jwtTokenProvider.getUserIdFromToken(accessToken);
+                userService.revokeRefreshToken(UUID.fromString(userId));
+                return ResponseEntity.ok("Logged out successfully");
+            } catch (Exception e) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Failed to logout: " + e.getMessage());
+            }
+        }
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Bearer token required for logout");
     }
 }

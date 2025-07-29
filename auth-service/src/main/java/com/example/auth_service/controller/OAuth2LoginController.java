@@ -36,7 +36,7 @@ public class OAuth2LoginController {
         String accessToken = jwtTokenProvider.generateAccessToken(userId.toString());
         String refreshToken = jwtTokenProvider.generateRefreshToken(userId.toString());
 
-        // Gérer la sauvegarde du refresh token dans la base de données
+        // Gérer la sauvegarde du refresh token dans la base de données (haché)
         userService.saveRefreshToken(userId, refreshToken);
 
         return ResponseEntity.ok(new LoginResponse(accessToken, refreshToken));
