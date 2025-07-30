@@ -19,9 +19,11 @@ spring:
 
 # Nouvelles propriétés pour la gestion des tokens
 jwt:
-  secret: c3ByaW5nLWJvb3Qtc2VjdXJpdHktand0LWNvbGxhYm9yYXRpdmUtdGVhbS1wcm9qZWN0LWtleS1zZWNyZXQ=
+  secret: X41FvJVDsha2YMfnMgf2DMGX1aA8bnepZxlNGHyNVIE
   access-token-expirationMs: 900000 # 15 minutes
   refresh-token-expirationMs: 604800000 # 7 jours
+  audience: my-secure-app # <--- Référence à la variable d'environnement avec une valeur par défaut
+  issuer: auth-service-issuer
 
 # =========================
 # SERVER & SSL/HTTPS CONFIG

@@ -1,10 +1,9 @@
-// src/main/java/com/example/auth_service/utils/JwtTokenProvider.java
 package com.example.auth_service.utils;
 
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
-import io.jsonwebtoken.security.SignatureException;
+import io.jsonwebtoken.security.SignatureException; // Import spécifique pour io.jsonwebtoken.security.SignatureException
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,27 +21,35 @@ public class JwtTokenProvider {
     private String secret;
 
     @Value("${jwt.access-token-expirationMs}")
-    private int accessTokenExpirationMs; // Durée de vie de l'access token en ms
+    private int accessTokenExpirationMs;
 
     @Value("${jwt.refresh-token-expirationMs}")
-    private int refreshTokenExpirationMs; // Durée de vie du refresh token en ms
+    private int refreshTokenExpirationMs;
 
-    // Génère un access token
+    @Value("${jwt.audience}")
+    private String audience;
+
+    @Value("${jwt.issuer}")
+    private String issuer;
+
     public String generateAccessToken(String userId) {
         return Jwts.builder()
                 .setSubject(userId)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + accessTokenExpirationMs))
+                .setAudience(audience)
+                .setIssuer(issuer)
                 .signWith(getSignKey(), SignatureAlgorithm.HS256)
                 .compact();
     }
 
-    // Génère un refresh token
     public String generateRefreshToken(String userId) {
         return Jwts.builder()
                 .setSubject(userId)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + refreshTokenExpirationMs))
+                .setAudience(audience)
+                .setIssuer(issuer)
                 .signWith(getSignKey(), SignatureAlgorithm.HS256)
                 .compact();
     }
@@ -51,11 +58,13 @@ public class JwtTokenProvider {
         try {
             Jwts.parserBuilder()
                     .setSigningKey(getSignKey())
+                    .requireAudience(audience)
+                    .requireIssuer(issuer)
                     .build()
                     .parseClaimsJws(authToken);
             return true;
-        } catch (SignatureException e) {
-            log.warn("Invalid JWT signature: {}", e.getMessage());
+        } catch (SignatureException e) { // Capture io.jsonwebtoken.security.SignatureException
+            log.warn("JWT signature validation failed: {}", e.getMessage());
         } catch (MalformedJwtException e) {
             log.warn("Invalid JWT token: {}", e.getMessage());
         } catch (ExpiredJwtException e) {
@@ -64,6 +73,8 @@ public class JwtTokenProvider {
             log.warn("JWT token is unsupported: {}", e.getMessage());
         } catch (IllegalArgumentException e) {
             log.warn("JWT claims string is empty: {}", e.getMessage());
+        } catch (JwtException e) { // Capture toute autre exception JWT non gérée spécifiquement
+            log.warn("JWT validation failed: {}", e.getMessage());
         }
         return false;
     }
@@ -71,6 +82,8 @@ public class JwtTokenProvider {
     public String getUserIdFromToken(String token) {
         Claims claims = Jwts.parserBuilder()
                 .setSigningKey(getSignKey())
+                .requireAudience(audience)
+                .requireIssuer(issuer)
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
