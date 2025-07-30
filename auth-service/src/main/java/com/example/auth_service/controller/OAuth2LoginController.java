@@ -2,7 +2,7 @@ package com.example.auth_service.controller;
 
 import com.example.auth_service.dto.LoginResponse;
 import com.example.auth_service.service.UserService;
-import com.example.auth_service.utils.JwtTokenProvider;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -18,11 +18,9 @@ public class OAuth2LoginController {
 
     private static final Logger log = LoggerFactory.getLogger(OAuth2LoginController.class);
 
-    private final JwtTokenProvider jwtTokenProvider;
     private final UserService userService;
 
-    public OAuth2LoginController(JwtTokenProvider jwtTokenProvider, UserService userService) {
-        this.jwtTokenProvider = jwtTokenProvider;
+    public OAuth2LoginController(UserService userService) {
         this.userService = userService;
     }
 
@@ -35,14 +33,19 @@ public class OAuth2LoginController {
 
         String email = oauth2User.getAttribute("email");
         String name = oauth2User.getAttribute("name");
-        String clientIpAddress = "N/A"; // L'adresse IP est plus difficile à obtenir directement ici pour OAuth2
+        // String clientIpAddress = "N/A"; // L'adresse IP est plus difficile à obtenir directement ici pour OAuth2
 
         UUID userId = userService.findOrCreateUser(email, name);
-        String accessToken = jwtTokenProvider.generateAccessToken(userId.toString());
-        String refreshToken = jwtTokenProvider.generateRefreshToken(userId.toString());
 
-        userService.saveRefreshToken(userId, refreshToken);
-        log.info("OAUTH2_LOGIN_SUCCES: User {} logged in successfully via OAuth2. User ID: {}", email, userId);
-        return ResponseEntity.ok(new LoginResponse(accessToken, refreshToken, false)); // requires2Fa est false pour OAuth2
+        // CORRECTION : Appel à la nouvelle méthode dans UserService
+        LoginResponse loginResponse = userService.generateAndSaveTokensForOAuth2User(userId);
+
+        if (loginResponse != null) {
+            log.info("OAUTH2_LOGIN_SUCCES: User {} logged in successfully via OAuth2. User ID: {}", email, userId);
+            return ResponseEntity.ok(loginResponse);
+        } else {
+            log.error("OAUTH2_LOGIN_ECHEC: Failed to generate tokens for OAuth2 user: {}", email);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
     }
 }

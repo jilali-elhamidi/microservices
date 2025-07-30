@@ -33,41 +33,32 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final RabbitTemplate rabbitTemplate;
     private final JwtTokenProvider jwtTokenProvider;
-    private final GoogleAuthenticator gAuth;
+    private final TwoFactorAuthService twoFactorAuthService;
+    private final AccountLockoutService accountLockoutService;
+    private final RefreshTokenManagementService refreshTokenManagementService;
+    private final UserRegistrationService userRegistrationService;
+    private final OAuth2UserManagementService oauth2UserManagementService;
 
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final long LOCK_TIME_DURATION_MINUTES = 15;
 
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, RabbitTemplate rabbitTemplate, JwtTokenProvider jwtTokenProvider) {
+    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder,
+                       RabbitTemplate rabbitTemplate, JwtTokenProvider jwtTokenProvider, TwoFactorAuthService twoFactorAuthService,
+                       AccountLockoutService accountLockoutService, RefreshTokenManagementService refreshTokenManagementService,
+                       UserRegistrationService userRegistrationService, OAuth2UserManagementService oauth2UserManagementService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.rabbitTemplate = rabbitTemplate;
         this.jwtTokenProvider = jwtTokenProvider;
-
-        GoogleAuthenticatorConfig.GoogleAuthenticatorConfigBuilder gaConfigBuilder =
-                new GoogleAuthenticatorConfig.GoogleAuthenticatorConfigBuilder();
-        gaConfigBuilder.setTimeStepSizeInMillis(TimeUnit.SECONDS.toMillis(30));
-        gaConfigBuilder.setWindowSize(5);
-
-        this.gAuth = new GoogleAuthenticator(gaConfigBuilder.build());
+        this.twoFactorAuthService = twoFactorAuthService;
+        this.accountLockoutService = accountLockoutService;
+        this.refreshTokenManagementService = refreshTokenManagementService;
+        this.userRegistrationService = userRegistrationService;
+        this.oauth2UserManagementService = oauth2UserManagementService;
     }
 
     public User registerUser(RegisterRequest request) {
-        if (userRepository.findByEmail(request.getEmail()).isPresent()) {
-            throw new RuntimeException("Email already exists");
-        }
-
-        User user = new User();
-        user.setEmail(request.getEmail());
-        user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.set2faEnabled(false);
-        user.setFailedLoginAttempts(0);
-        user.setAccountLocked(false);
-        userRepository.save(user);
-
-        publishUserRegisteredEvent(user.getId(), user.getEmail());
-        log.info("UTILISATEUR_ENREGISTRE: User registered successfully: {}", user.getEmail());
-        return user;
+        return userRegistrationService.registerNewUser(request);
     }
 
     public LoginResponse login(LoginRequest request, String clientIpAddress) {
@@ -80,36 +71,18 @@ public class UserService {
 
         User user = userOptional.get();
 
-        if (user.isAccountLocked()) {
-            if (user.getLockTime() != null && LocalDateTime.now().isBefore(user.getLockTime().plusMinutes(LOCK_TIME_DURATION_MINUTES))) {
-                log.warn("AUTHENTIFICATION_ECHEC: Account locked for user: {} from IP: {}", request.getEmail(), clientIpAddress);
-                throw new RuntimeException("Account is locked. Please try again later.");
-            } else {
-                user.setAccountLocked(false);
-                user.setFailedLoginAttempts(0);
-                user.setLockTime(null);
-                userRepository.save(user);
-                log.info("COMPTE_DEVERROUILLE: Account unlocked for user: {}", user.getEmail());
-            }
+        if (accountLockoutService.checkAndHandleAccountLock(user)) {
+            log.warn("AUTHENTIFICATION_ECHEC: Account locked for user: {} from IP: {}", request.getEmail(), clientIpAddress);
+            throw new RuntimeException("Account is locked. Please try again later.");
         }
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
-            if (user.getFailedLoginAttempts() >= MAX_FAILED_ATTEMPTS) {
-                user.setAccountLocked(true);
-                user.setLockTime(LocalDateTime.now());
-                log.warn("COMPTE_VERROUILLE: Account locked for user: {} after {} failed attempts from IP: {}", request.getEmail(), user.getFailedLoginAttempts(), clientIpAddress);
-            }
-            userRepository.save(user);
+            accountLockoutService.recordFailedLoginAttempt(user, clientIpAddress);
             log.warn("AUTHENTIFICATION_ECHEC: Invalid credentials for user: {} from IP: {}", request.getEmail(), clientIpAddress);
             return null;
         }
 
-        user.setFailedLoginAttempts(0);
-        user.setAccountLocked(false);
-        user.setLockTime(null);
-        userRepository.save(user);
-
+        accountLockoutService.resetFailedLoginAttempts(user);
         log.info("AUTHENTIFICATION_SUCCES: User logged in successfully: {} from IP: {}", request.getEmail(), clientIpAddress);
 
         if (user.is2faEnabled()) {
@@ -117,8 +90,7 @@ public class UserService {
         } else {
             String accessToken = jwtTokenProvider.generateAccessToken(user.getId().toString());
             String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId().toString());
-            user.setHashedRefreshToken(passwordEncoder.encode(refreshToken));
-            userRepository.save(user);
+            refreshTokenManagementService.saveRefreshToken(user, refreshToken);
             return new LoginResponse(accessToken, refreshToken, false);
         }
     }
@@ -127,19 +99,14 @@ public class UserService {
         Optional<User> userOptional = userRepository.findByEmail(email);
         if (userOptional.isPresent()) {
             User user = userOptional.get();
-            if (user.is2faEnabled() && user.getTwoFaSecret() != null) {
-                if (gAuth.authorize(user.getTwoFaSecret(), Integer.parseInt(twoFaCode))) {
-                    String accessToken = jwtTokenProvider.generateAccessToken(user.getId().toString());
-                    String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId().toString());
-                    user.setHashedRefreshToken(passwordEncoder.encode(refreshToken));
-                    userRepository.save(user);
-                    return new LoginResponse(accessToken, refreshToken, false);
-                } else {
-                    log.warn("AUTHENTIFICATION_ECHEC_2FA: Invalid 2FA code for user: {} from IP: {}", email, clientIpAddress);
-                    return null;
-                }
+            if (twoFactorAuthService.verifyTotpCode(user, twoFaCode)) {
+                String accessToken = jwtTokenProvider.generateAccessToken(user.getId().toString());
+                String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId().toString());
+                refreshTokenManagementService.saveRefreshToken(user, refreshToken);
+                log.info("AUTHENTIFICATION_SUCCES_2FA: User logged in with 2FA successfully: {} from IP: {}", email, clientIpAddress);
+                return new LoginResponse(accessToken, refreshToken, false);
             } else {
-                log.warn("AUTHENTIFICATION_ECHEC_2FA: 2FA not enabled or secret missing for user: {} from IP: {}", email, clientIpAddress);
+                log.warn("AUTHENTIFICATION_ECHEC_2FA: Invalid 2FA code for user: {} from IP: {}", email, clientIpAddress);
                 return null;
             }
         }
@@ -148,65 +115,15 @@ public class UserService {
     }
 
     public String generate2FaSecret(UUID userId) {
-        Optional<User> userOptional = userRepository.findById(userId);
-        if (userOptional.isPresent()) {
-            User user = userOptional.get();
-            if (user.is2faEnabled()) {
-                throw new RuntimeException("2FA is already enabled for this user.");
-            }
-            // Correction: Utiliser createCredentials()
-            GoogleAuthenticatorKey key = gAuth.createCredentials();
-            user.setTwoFaSecret(key.getKey());
-            userRepository.save(user);
-
-            // Correction: Utiliser getOtpAuthURL() qui prend GoogleAuthenticatorKey
-            String qrCodeUrl = GoogleAuthenticatorQRGenerator.getOtpAuthURL("VotreApp", user.getEmail(), key);
-            log.info("2FA_SECRET_GENERE: Secret generated for user: {}", user.getEmail());
-            return qrCodeUrl;
-        }
-        log.warn("2FA_SECRET_ECHEC: User not found to generate 2FA secret for userId: {}", userId);
-        return null;
+        return twoFactorAuthService.generate2FaSecret(userId);
     }
 
     public boolean enable2Fa(UUID userId, String twoFaCode) {
-        Optional<User> userOptional = userRepository.findById(userId);
-        if (userOptional.isPresent()) {
-            User user = userOptional.get();
-            if (user.is2faEnabled()) {
-                log.warn("2FA_ACTIVATION_ECHEC: 2FA already enabled for user: {}", userId);
-                return false;
-            }
-            if (user.getTwoFaSecret() == null) {
-                log.warn("2FA_ACTIVATION_ECHEC: 2FA secret not generated for user: {}", userId);
-                return false;
-            }
-
-            if (gAuth.authorize(user.getTwoFaSecret(), Integer.parseInt(twoFaCode))) {
-                user.set2faEnabled(true);
-                userRepository.save(user);
-                log.info("2FA_ACTIVE: 2FA enabled successfully for user: {}", user.getEmail());
-                return true;
-            } else {
-                log.warn("2FA_ACTIVATION_ECHEC: Invalid 2FA code provided during 2FA activation for user: {}", userId);
-                return false;
-            }
-        }
-        log.warn("2FA_ACTIVATION_ECHEC: User not found for 2FA activation: {}", userId);
-        return false;
+        return twoFactorAuthService.enable2Fa(userId, twoFaCode);
     }
 
     public boolean disable2Fa(UUID userId) {
-        Optional<User> userOptional = userRepository.findById(userId);
-        if (userOptional.isPresent()) {
-            User user = userOptional.get();
-            user.set2faEnabled(false);
-            user.setTwoFaSecret(null);
-            userRepository.save(user);
-            log.info("2FA_DESACTIVE: 2FA disabled successfully for user: {}", user.getEmail());
-            return true;
-        }
-        log.warn("2FA_DESACTIVATION_ECHEC: User not found for 2FA deactivation: {}", userId);
-        return false;
+        return twoFactorAuthService.disable2Fa(userId);
     }
 
     public LoginResponse refreshToken(String oldRefreshToken, String clientIpAddress) {
@@ -220,22 +137,10 @@ public class UserService {
 
         if (userOptional.isPresent()) {
             User user = userOptional.get();
-
-            if (user.getHashedRefreshToken() != null && passwordEncoder.matches(oldRefreshToken, user.getHashedRefreshToken())) {
-                user.setHashedRefreshToken(null);
-                userRepository.save(user);
-                log.info("REFRESH_TOKEN_ROTATION: Old refresh token invalidated for user: {} from IP: {}", user.getEmail(), clientIpAddress);
-
+            String newRefreshToken = refreshTokenManagementService.rotateRefreshToken(user, oldRefreshToken, clientIpAddress);
+            if (newRefreshToken != null) {
                 String newAccessToken = jwtTokenProvider.generateAccessToken(userId);
-                String newRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
-
                 return new LoginResponse(newAccessToken, newRefreshToken, false);
-            } else {
-                log.warn("REFRESH_TOKEN_COMPROMIS: Refresh token provided does not match stored token or already used for user: {} from IP: {}", user.getEmail(), clientIpAddress);
-                user.setHashedRefreshToken(null);
-                userRepository.save(user);
-                log.error("REFRESH_TOKEN_REVOCATION_FORCEE: All refresh tokens revoked for user: {} due to suspected compromise from IP: {}", user.getEmail(), clientIpAddress);
-                return null;
             }
         }
         log.warn("REFRESH_TOKEN_ECHEC: User not found for refresh token with userId: {} from IP: {}", userId, clientIpAddress);
@@ -243,48 +148,25 @@ public class UserService {
     }
 
     public void revokeRefreshToken(UUID userId) {
-        Optional<User> userOptional = userRepository.findById(userId);
-        if (userOptional.isPresent()) {
-            User user = userOptional.get();
-            user.setHashedRefreshToken(null);
-            userRepository.save(user);
-            log.info("DECONNEXION_SUCCES: Refresh token revoked for user: {}", user.getEmail());
-        } else {
-            log.warn("DECONNEXION_ECHEC: User not found to revoke refresh token for userId: {}", userId);
-        }
+        refreshTokenManagementService.revokeRefreshToken(userId);
     }
 
     public UUID findOrCreateUser(String email, String name) {
-        Optional<User> userOptional = userRepository.findByEmail(email);
-
-        if (userOptional.isPresent()) {
-            log.info("OAUTH2_CONNEXION: Existing user logged in via OAuth2: {}", email);
-            return userOptional.get().getId();
-        } else {
-            User newUser = new User();
-            newUser.setEmail(email);
-            newUser.setPassword(passwordEncoder.encode(UUID.randomUUID().toString()));
-            newUser.set2faEnabled(false);
-            newUser.setFailedLoginAttempts(0);
-            newUser.setAccountLocked(false);
-            User savedUser = userRepository.save(newUser);
-
-            publishUserRegisteredEvent(savedUser.getId(), savedUser.getEmail());
-            log.info("OAUTH2_ENREGISTREMENT: New user registered via OAuth2: {}", email);
-            return savedUser.getId();
-        }
+        return oauth2UserManagementService.findOrCreateOAuth2User(email, name);
     }
 
-    public void saveRefreshToken(UUID userId, String refreshToken) {
+    // Nouvelle méthode pour générer et sauvegarder les tokens après une connexion OAuth2
+    public LoginResponse generateAndSaveTokensForOAuth2User(UUID userId) {
         Optional<User> userOptional = userRepository.findById(userId);
         if (userOptional.isPresent()) {
             User user = userOptional.get();
-            user.setHashedRefreshToken(passwordEncoder.encode(refreshToken));
-            userRepository.save(user);
-            log.info("OAUTH2_REFRESH_TOKEN_SAUVEGARDE: Refresh token saved for OAuth2 user: {}", user.getEmail());
-        } else {
-            log.warn("OAUTH2_REFRESH_TOKEN_ECHEC: User not found to save refresh token for userId: {}", userId);
+            String accessToken = jwtTokenProvider.generateAccessToken(user.getId().toString());
+            String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId().toString());
+            refreshTokenManagementService.saveRefreshToken(user, refreshToken);
+            return new LoginResponse(accessToken, refreshToken, false);
         }
+        log.warn("OAUTH2_TOKEN_GEN_ECHEC: User not found to generate tokens for userId: {}", userId);
+        return null;
     }
 
     private void publishUserRegisteredEvent(UUID userId, String email) {
