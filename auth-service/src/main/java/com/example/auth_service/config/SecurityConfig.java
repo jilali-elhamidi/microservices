@@ -26,7 +26,10 @@ public class SecurityConfig {
                                 "/auth/validateToken",
                                 "/auth/refresh-token",
                                 "/auth/2fa/**",
-                                "/login-success"
+                                "/login-success",
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
