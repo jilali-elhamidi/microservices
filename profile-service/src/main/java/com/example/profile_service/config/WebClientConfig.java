@@ -13,21 +13,30 @@ import reactor.netty.http.client.HttpClient;
 public class WebClientConfig {
 
     @Bean
-    public WebClient authWebClient() {
+    @LoadBalanced
+    public WebClient.Builder loadBalancedWebClientBuilder() {
+        return WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(customHttpClient()));
+    }
+
+    @Bean
+    public WebClient authWebClient(WebClient.Builder builder) {
+        return builder
+                .baseUrl("https://auth-service")  // Nom Eureka
+                .build();
+    }
+
+    private HttpClient customHttpClient() {
         try {
-            var sslContext = SslContextBuilder.forClient()
+            var sslContext = SslContextBuilder
+                    .forClient()
                     .trustManager(InsecureTrustManagerFactory.INSTANCE)
                     .build();
 
-            var httpClient = HttpClient.create()
+            return HttpClient.create()
                     .secure(t -> t.sslContext(sslContext));
-
-            return WebClient.builder()
-                    .baseUrl("https://192.168.56.1:8443") // ← IP directe
-                    .clientConnector(new ReactorClientHttpConnector(httpClient))
-                    .build();
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to create WebClient", e);
+            throw new RuntimeException("Failed to create custom HttpClient", e);
         }
     }
 }

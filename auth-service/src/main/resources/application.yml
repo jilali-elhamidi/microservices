@@ -36,3 +36,12 @@ server:
     key-password: jilali
     key-store-type: PKCS12
     key-alias: myapp
+eureka:
+  instance:
+    prefer-ip-address: true
+    secure-port-enabled: true
+    non-secure-port-enabled: false
+    secure-port: 8443
+    status-page-url: https://auth-service:8443/actuator/info
+    health-check-url: https://auth-service:8443/actuator/health
+    home-page-url: https://auth-service:8443/
